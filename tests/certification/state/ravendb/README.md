@@ -1,6 +1,6 @@
 # RavenDB State Store certification testing
 
-This project aims to test the MongoDB State Store component under various conditions.
+This project aims to test the RavenDB State Store component under various conditions.
 
 ## Test plan
 Run:
