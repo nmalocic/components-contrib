@@ -5,7 +5,7 @@ services:
     ports:
       - "8080:8080"
     environment:
-      - RAVEN_LICENSE={"Id":"26e0dde7-2dbc-4a0c-9f80-cfddc9255951","Name":"nemanja","Keys":["34E+8RIoJNyuCwg7xS56DDY/a","p+5dpKVx6FttJBq4SIbddEq1Q","I/teOHjT5fpmWlwbAU7/ihevn","mlndaWt05dwsT+j2Zy6loA7SY","AkFsn0B+4j/mBbw5l4L57y4Me","+4gjHT7OOxo6JojPf5/WIhs/I","1ZU5lGcP/CHalK0a5i07BAAYE","DNi4yBQYHKEkDCgsMDQ4PEBES","ExQ1FhcYGRobHB0enwIfAJ8CI","ACfAiEgnwIjAJ8CJACfAiUAnw","ImAJ8CJwCfAigAnwIpAJ8CKgC","fAisAnwIsAJ8CLQCfAi4AnwIv","AJ8CMACfAzFAAp8DMkACnwMzQ","C2fAzRAJJ8DNUAknwM2QAGfAz","tAA58DPEAPnwM9QAGfAz5ABZ8","DP0ABnwNAQAVDBkQDYgNbnwRB","YP9a"]}
+      - RAVEN_LICENSE={"Id":"1bcf6b3f-cd52-488c-9aa2-c982d6e57c78","Name":"RavenDB","Keys":["CtmBDhwRJAJIDOHv+Pev+B8o4","A5l3K4n1z2FbtgHsKPl1QkQNx","LPqr9nkPEq5MUCHQZ0XkkP5BY","Czc9DkF33Y8mNFemJZl8tkGm6","DY2Q6YyYtEt/jQayDOUVUtUlY","FC4inkD4zkb3Ii2WEbyv5RRew","jzoKxeOVYXQsToAMe6xG9ABYE","DNy4wBSYoSQMqKywtLi8wJzEy","MzQVFjc4OTo7PD0+nwIfIJ8CI","CCfAiEgnwIjIJ8CJCCfAiUgnw","ImIJ8CJyCfAiggnwIpIJ8CKiC","fAisgnwIsIJ8CLSCfAi4gnwIv","IJ8CMCCfAzZAAZ8CQiBDJEQJY","htbnwRBYBhb"]}
       - RAVEN_DATABASE=testdapr
       - RAVEN_Setup_Mode=None
       - RAVEN_License_Eula_Accepted=true
