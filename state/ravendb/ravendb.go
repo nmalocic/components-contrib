@@ -28,6 +28,7 @@ import (
 	kitmd "github.com/dapr/kit/metadata"
 	jsoniterator "github.com/json-iterator/go"
 	ravendb "github.com/ravendb/ravendb-go-client"
+	"math/rand"
 	"net/http"
 	"reflect"
 	"strings"
@@ -79,8 +80,8 @@ func NewRavenDB(logger logger.Logger) state.Store {
 	store := &RavenDB{
 		features: []state.Feature{
 			state.FeatureETag,
-			state.FeatureTransactional,
-			state.FeatureQueryAPI,
+			// state.FeatureTransactional,
+			// state.FeatureQueryAPI,
 			state.FeatureTTL,
 		},
 		logger: logger,
@@ -121,11 +122,14 @@ func (r *RavenDB) Delete(ctx context.Context, req *state.DeleteRequest) error {
 
 	err = r.deleteInternal(ctx, req, session)
 	if err != nil {
-		return fmt.Errorf("error deleting %s", req.Key)
+		return err
 	}
 
 	err = session.SaveChanges()
 	if err != nil {
+		if isConcurrencyException(err) {
+			return state.NewETagError(state.ETagMismatch, err)
+		}
 		return errors.New("error saving changes")
 	}
 
@@ -173,7 +177,6 @@ func (r *RavenDB) Get(ctx context.Context, req *state.GetRequest) (*state.GetRes
 		ETag:     &etagResp,
 		Metadata: meta,
 	}
-
 	return resp, nil
 }
 
@@ -190,6 +193,9 @@ func (r *RavenDB) Set(ctx context.Context, req *state.SetRequest) error {
 
 	err = session.SaveChanges()
 	if err != nil {
+		if isConcurrencyException(err) {
+			return state.NewETagError(state.ETagMismatch, err)
+		}
 		return fmt.Errorf("error saving changes %s", err)
 	}
 	return nil
@@ -205,32 +211,35 @@ func (r *RavenDB) Ping(ctx context.Context) error {
 	return nil
 }
 
-func (r *RavenDB) Multi(ctx context.Context, request *state.TransactionalStateRequest) error {
-	session, err := r.documentStore.OpenSession(r.metadata.DatabaseName)
-	if err != nil {
-		return fmt.Errorf("error opening session while storing data faild with error %s", err)
-	}
-	defer session.Close()
-	for _, o := range request.Operations {
-		switch req := o.(type) {
-		case state.SetRequest:
-			err = r.setInternal(ctx, &req, session)
-		case state.DeleteRequest:
-			err = r.deleteInternal(ctx, &req, session)
-		}
-
-		if err != nil {
-			return fmt.Errorf("error parsing requests: %w", err)
-		}
-	}
-
-	err = session.SaveChanges()
-	if err != nil {
-		return fmt.Errorf("error during transaction, aborting the transaction: %w", err)
-	}
-
-	return nil
-}
+//func (r *RavenDB) Multi(ctx context.Context, request *state.TransactionalStateRequest) error {
+//	session, err := r.documentStore.OpenSession(r.metadata.DatabaseName)
+//	if err != nil {
+//		return fmt.Errorf("error opening session while storing data faild with error %s", err)
+//	}
+//	defer session.Close()
+//	for _, o := range request.Operations {
+//		switch req := o.(type) {
+//		case state.SetRequest:
+//			err = r.setInternal(ctx, &req, session)
+//		case state.DeleteRequest:
+//			err = r.deleteInternal(ctx, &req, session)
+//		}
+//
+//		if err != nil {
+//			return fmt.Errorf("error parsing requests: %w", err)
+//		}
+//	}
+//
+//	err = session.SaveChanges()
+//	if err != nil {
+//		if isConcurrencyException(err) {
+//			return state.NewETagError(state.ETagMismatch, err)
+//		}
+//		return fmt.Errorf("error during transaction, aborting the transaction: %w", err)
+//	}
+//
+//	return nil
+//}
 
 func (r *RavenDB) BulkGet(ctx context.Context, req []state.GetRequest, _ state.BulkGetOpts) ([]state.BulkGetResponse, error) {
 	// If nothing is being requested, short-circuit
@@ -255,16 +264,32 @@ func (r *RavenDB) BulkGet(ctx context.Context, req []state.GetRequest, _ state.B
 
 	var resp = make([]state.BulkGetResponse, 0, len(items))
 
-	for _, current := range items {
+	for ID, current := range items {
 		if current == nil {
-			continue
+			var convert = state.BulkGetResponse{
+				Key:      ID,
+				Data:     nil,
+				ETag:     nil,
+				Metadata: make(map[string]string),
+			}
+			resp = append(resp, convert)
+		} else {
+			ravenMeta, err := session.GetMetadataFor(current)
+			var etagResp = ""
+			if err == nil {
+				var eTag, okETag = ravenMeta.Get(changeVector)
+				if okETag {
+					etagResp = eTag.(string)
+				}
+			}
+			var convert = state.BulkGetResponse{
+				Key:      current.ID,
+				Data:     []byte(current.Value),
+				ETag:     &etagResp,
+				Metadata: make(map[string]string),
+			}
+			resp = append(resp, convert)
 		}
-		var convert = state.BulkGetResponse{
-			Key:      current.ID,
-			Data:     []byte(current.Value),
-			Metadata: make(map[string]string),
-		}
-		resp = append(resp, convert)
 	}
 
 	return resp, nil
@@ -297,7 +322,31 @@ func (r *RavenDB) setInternal(ctx context.Context, req *state.SetRequest, sessio
 
 	if req.Options.Concurrency == state.FirstWrite {
 		// First write wins, we send empty change vector to check if exists
-		err = session.StoreWithChangeVectorAndID(item, "", req.Key)
+
+		// current SDK version of go doesn't let us to check concurency violation on items that are not in databse.
+		// we need to try to load, and do regullar save if item is not in DB (real first save)
+		// if we have item in DB we can try to override it with concurency check
+		var newItem *Item
+		err = session.Load(&newItem, req.Key)
+		if err != nil {
+			fmt.Println("error loading item during set", err)
+		}
+		if newItem == nil {
+			err = session.Store(item)
+		} else {
+			var eTag string
+			if req.HasETag() {
+				eTag = *req.ETag
+			} else {
+				eTag = RandStringRunes(5)
+			}
+
+			if newItem.Value == item.Value {
+				return fmt.Errorf("error storing data: %s", err)
+			}
+			newItem.Value = item.Value
+			err = session.StoreWithChangeVectorAndID(newItem, eTag, req.Key)
+		}
 		if err != nil {
 			return fmt.Errorf("error storing data: %s", err)
 		}
@@ -306,6 +355,9 @@ func (r *RavenDB) setInternal(ctx context.Context, req *state.SetRequest, sessio
 		if req.HasETag() {
 			eTag := *req.ETag
 			err = session.StoreWithChangeVectorAndID(item, eTag, req.Key)
+			if err != nil {
+				return state.NewETagError(state.ETagMismatch, err)
+			}
 		} else {
 			err = session.Store(item)
 		}
@@ -333,37 +385,19 @@ func (r *RavenDB) setInternal(ctx context.Context, req *state.SetRequest, sessio
 }
 
 func (r *RavenDB) deleteInternal(ctx context.Context, req *state.DeleteRequest, session *ravendb.DocumentSession) error {
-	err := session.DeleteByID(req.Key, "")
+	var err error
+	if req.HasETag() {
+		err = session.DeleteByID(req.Key, *req.ETag)
+	} else {
+		//TODO: Fix after update to ravendb sdk
+		err = session.DeleteByID(req.Key, "")
+	}
+
 	if err != nil {
-		return fmt.Errorf("error deleting %s", req.Key)
+		return err
 	}
 
 	return nil
-}
-
-func getRavenDBMetaData(meta state.Metadata) (RavenDBMetadata, error) {
-	m := RavenDBMetadata{
-		DatabaseName: defaultDatabaseName,
-		EnableTTL:    defaultEnableTTL,
-		TTLFrequency: defaultTTLFrequency,
-	}
-
-	err := kitmd.DecodeMetadata(meta.Properties, &m)
-	if err != nil {
-		return m, err
-	}
-
-	if m.ServerURL == "" {
-		return m, errors.New("server url is required")
-	}
-
-	if strings.HasPrefix(m.ServerURL, httpsPrefix) {
-		if m.CertPath == "" || m.KeyPath == "" {
-			return m, errors.New("certificate and key are required for secure connection")
-		}
-	}
-
-	return m, nil
 }
 
 func (r *RavenDB) getRavenDBStore(ctx context.Context) (*ravendb.DocumentStore, error) {
@@ -409,7 +443,10 @@ func (r *RavenDB) initTTL(store *ravendb.DocumentStore) {
 	if err != nil {
 		return
 	}
-	store.Maintenance().Send(operation)
+	err = store.Maintenance().Send(operation)
+	if err != nil {
+		fmt.Println(err)
+	}
 }
 
 func (r *RavenDB) setupDatabase(store *ravendb.DocumentStore) {
@@ -428,4 +465,47 @@ func (r *RavenDB) setupDatabase(store *ravendb.DocumentStore) {
 			}
 		}
 	}
+}
+
+func getRavenDBMetaData(meta state.Metadata) (RavenDBMetadata, error) {
+	m := RavenDBMetadata{
+		DatabaseName: defaultDatabaseName,
+		EnableTTL:    defaultEnableTTL,
+		TTLFrequency: defaultTTLFrequency,
+	}
+
+	err := kitmd.DecodeMetadata(meta.Properties, &m)
+	if err != nil {
+		return m, err
+	}
+
+	if m.ServerURL == "" {
+		return m, errors.New("server url is required")
+	}
+
+	if strings.HasPrefix(m.ServerURL, httpsPrefix) {
+		if m.CertPath == "" || m.KeyPath == "" {
+			return m, errors.New("certificate and key are required for secure connection")
+		}
+	}
+
+	return m, nil
+}
+
+func isConcurrencyException(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(err.Error(), "Optimistic concurrency violation")
+}
+
+// helper method to generate random string
+var letterRunes = []rune("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ")
+
+func RandStringRunes(n int) string {
+	b := make([]rune, n)
+	for i := range b {
+		b[i] = letterRunes[rand.Intn(len(letterRunes))]
+	}
+	return string(b)
 }

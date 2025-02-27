@@ -105,4 +105,4 @@ components:
   - component: gcp.firestore.cloud
     operations: []
   - component: ravendb
-    operations: [ "transaction", "etag", "first-write", "ttl" ]
+    operations: ["first-write", "etag", "ttl"]
