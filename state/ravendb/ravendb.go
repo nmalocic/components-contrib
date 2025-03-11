@@ -80,7 +80,7 @@ func NewRavenDB(logger logger.Logger) state.Store {
 	store := &RavenDB{
 		features: []state.Feature{
 			state.FeatureETag,
-			// state.FeatureTransactional,
+			state.FeatureTransactional,
 			// state.FeatureQueryAPI,
 			state.FeatureTTL,
 		},
@@ -120,7 +120,7 @@ func (r *RavenDB) Delete(ctx context.Context, req *state.DeleteRequest) error {
 	}
 	defer session.Close()
 
-	err = r.deleteInternal(ctx, req, session)
+	err = r.deleteInternal(ctx, req, session, false)
 	if err != nil {
 		return err
 	}
@@ -211,35 +211,35 @@ func (r *RavenDB) Ping(ctx context.Context) error {
 	return nil
 }
 
-//func (r *RavenDB) Multi(ctx context.Context, request *state.TransactionalStateRequest) error {
-//	session, err := r.documentStore.OpenSession(r.metadata.DatabaseName)
-//	if err != nil {
-//		return fmt.Errorf("error opening session while storing data faild with error %s", err)
-//	}
-//	defer session.Close()
-//	for _, o := range request.Operations {
-//		switch req := o.(type) {
-//		case state.SetRequest:
-//			err = r.setInternal(ctx, &req, session)
-//		case state.DeleteRequest:
-//			err = r.deleteInternal(ctx, &req, session)
-//		}
-//
-//		if err != nil {
-//			return fmt.Errorf("error parsing requests: %w", err)
-//		}
-//	}
-//
-//	err = session.SaveChanges()
-//	if err != nil {
-//		if isConcurrencyException(err) {
-//			return state.NewETagError(state.ETagMismatch, err)
-//		}
-//		return fmt.Errorf("error during transaction, aborting the transaction: %w", err)
-//	}
-//
-//	return nil
-//}
+func (r *RavenDB) Multi(ctx context.Context, request *state.TransactionalStateRequest) error {
+	session, err := r.documentStore.OpenSession(r.metadata.DatabaseName)
+	if err != nil {
+		return fmt.Errorf("error opening session while storing data faild with error %s", err)
+	}
+	defer session.Close()
+	for _, o := range request.Operations {
+		switch req := o.(type) {
+		case state.SetRequest:
+			err = r.setInternal(ctx, &req, session)
+		case state.DeleteRequest:
+			err = r.deleteInternal(ctx, &req, session, true)
+		}
+
+		if err != nil {
+			return fmt.Errorf("error parsing requests: %w", err)
+		}
+	}
+
+	err = session.SaveChanges()
+	if err != nil {
+		if isConcurrencyException(err) {
+			return state.NewETagError(state.ETagMismatch, err)
+		}
+		return fmt.Errorf("error during transaction, aborting the transaction: %w", err)
+	}
+
+	return nil
+}
 
 func (r *RavenDB) BulkGet(ctx context.Context, req []state.GetRequest, _ state.BulkGetOpts) ([]state.BulkGetResponse, error) {
 	// If nothing is being requested, short-circuit
@@ -384,13 +384,22 @@ func (r *RavenDB) setInternal(ctx context.Context, req *state.SetRequest, sessio
 	return nil
 }
 
-func (r *RavenDB) deleteInternal(ctx context.Context, req *state.DeleteRequest, session *ravendb.DocumentSession) error {
+func (r *RavenDB) deleteInternal(ctx context.Context, req *state.DeleteRequest, session *ravendb.DocumentSession, fromTransaction bool) error {
 	var err error
-	if req.HasETag() {
-		err = session.DeleteByID(req.Key, *req.ETag)
+	if fromTransaction {
+		var itemToDelete *Item
+		err = session.Load(&itemToDelete, req.Key)
+		if err == nil {
+			err = session.Delete(itemToDelete)
+		}
 	} else {
-		//TODO: Fix after update to ravendb sdk
-		err = session.DeleteByID(req.Key, "")
+
+		if req.HasETag() {
+			err = session.DeleteByID(req.Key, *req.ETag)
+		} else {
+			//TODO: Fix after update to ravendb sdk
+			err = session.DeleteByID(req.Key, "")
+		}
 	}
 
 	if err != nil {

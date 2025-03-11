@@ -140,77 +140,77 @@ func TestRavenDB(t *testing.T) {
 			return nil
 		}
 	}
-	//
-	//transactionsTest := func() func(ctx flow.Context) error {
-	//	return func(ctx flow.Context) error {
-	//		client, err := daprClient.NewClientWithPort(strconv.Itoa(currentGrpcPort))
-	//		if err != nil {
-	//			panic(err)
-	//		}
-	//		defer client.Close()
-	//
-	//		err = client.ExecuteStateTransaction(ctx, stateStoreName, nil, []*daprClient.StateOperation{
-	//			{
-	//				Type: daprClient.StateOperationTypeUpsert,
-	//				Item: &daprClient.SetStateItem{
-	//					Key:   "reqKey1",
-	//					Value: []byte("reqVal1"),
-	//					Metadata: map[string]string{
-	//						"ttlInSeconds": "-1",
-	//					},
-	//				},
-	//			},
-	//			{
-	//				Type: daprClient.StateOperationTypeUpsert,
-	//				Item: &daprClient.SetStateItem{
-	//					Key:   "reqKey2",
-	//					Value: []byte("reqVal2"),
-	//					Metadata: map[string]string{
-	//						"ttlInSeconds": "222",
-	//					},
-	//				},
-	//			},
-	//			{
-	//				Type: daprClient.StateOperationTypeUpsert,
-	//				Item: &daprClient.SetStateItem{
-	//					Key:   "reqKey3",
-	//					Value: []byte("reqVal3"),
-	//				},
-	//			},
-	//			{
-	//				Type: daprClient.StateOperationTypeUpsert,
-	//				Item: &daprClient.SetStateItem{
-	//					Key:   "reqKey4",
-	//					Value: []byte("reqVal101"),
-	//					Metadata: map[string]string{
-	//						"ttlInSeconds": "50",
-	//					},
-	//				},
-	//			},
-	//			{
-	//				Type: daprClient.StateOperationTypeUpsert,
-	//				Item: &daprClient.SetStateItem{
-	//					Key:   "reqKey5",
-	//					Value: []byte("reqVal103"),
-	//					Metadata: map[string]string{
-	//						"ttlInSeconds": "50",
-	//					},
-	//				},
-	//			},
-	//		})
-	//		require.NoError(t, err)
-	//
-	//		resp1, err := client.GetState(ctx, stateStoreName, "reqKey1", nil)
-	//		require.NoError(t, err)
-	//		assert.Equal(t, "reqVal1", string(resp1.Value))
-	//
-	//		resp3, err := client.GetState(ctx, stateStoreName, "reqKey3", nil)
-	//		require.NoError(t, err)
-	//		assert.Equal(t, "reqVal3", string(resp3.Value))
-	//
-	//		return nil
-	//	}
-	//}
+
+	transactionsTest := func() func(ctx flow.Context) error {
+		return func(ctx flow.Context) error {
+			client, err := daprClient.NewClientWithPort(strconv.Itoa(currentGrpcPort))
+			if err != nil {
+				panic(err)
+			}
+			defer client.Close()
+
+			err = client.ExecuteStateTransaction(ctx, stateStoreName, nil, []*daprClient.StateOperation{
+				{
+					Type: daprClient.StateOperationTypeUpsert,
+					Item: &daprClient.SetStateItem{
+						Key:   "reqKey1",
+						Value: []byte("reqVal1"),
+						Metadata: map[string]string{
+							"ttlInSeconds": "-1",
+						},
+					},
+				},
+				{
+					Type: daprClient.StateOperationTypeUpsert,
+					Item: &daprClient.SetStateItem{
+						Key:   "reqKey2",
+						Value: []byte("reqVal2"),
+						Metadata: map[string]string{
+							"ttlInSeconds": "222",
+						},
+					},
+				},
+				{
+					Type: daprClient.StateOperationTypeUpsert,
+					Item: &daprClient.SetStateItem{
+						Key:   "reqKey3",
+						Value: []byte("reqVal3"),
+					},
+				},
+				{
+					Type: daprClient.StateOperationTypeUpsert,
+					Item: &daprClient.SetStateItem{
+						Key:   "reqKey4",
+						Value: []byte("reqVal101"),
+						Metadata: map[string]string{
+							"ttlInSeconds": "50",
+						},
+					},
+				},
+				{
+					Type: daprClient.StateOperationTypeUpsert,
+					Item: &daprClient.SetStateItem{
+						Key:   "reqKey5",
+						Value: []byte("reqVal103"),
+						Metadata: map[string]string{
+							"ttlInSeconds": "50",
+						},
+					},
+				},
+			})
+			require.NoError(t, err)
+
+			resp1, err := client.GetState(ctx, stateStoreName, "reqKey1", nil)
+			require.NoError(t, err)
+			assert.Equal(t, "reqVal1", string(resp1.Value))
+
+			resp3, err := client.GetState(ctx, stateStoreName, "reqKey3", nil)
+			require.NoError(t, err)
+			assert.Equal(t, "reqVal3", string(resp3.Value))
+
+			return nil
+		}
+	}
 
 	testGetAfterRavenDBRestart := func(ctx flow.Context) error {
 		client, err := daprClient.NewClientWithPort(fmt.Sprint(currentGrpcPort))
@@ -239,7 +239,7 @@ func TestRavenDB(t *testing.T) {
 		Step("Waiting for component to load...", flow.Sleep(10*time.Second)).
 		Step("Run basic test", basicTest).
 		Step("Run Etag test", eTagTest()).
-		// Step("Run transaction test", transactionsTest()).
+		Step("Run transaction test", transactionsTest()).
 		Step("Run time to live test", timeToLiveTest()).
 		Step("Interrupt network",
 			network.InterruptNetwork(5*time.Second, nil, nil, "27017:27017")).
